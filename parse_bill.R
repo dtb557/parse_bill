@@ -4,6 +4,8 @@ library(tidyverse)
 source("lines.R")
 source("tidy_equipment_charges.R")
 source("charges_to_df.R")
+source("reformat_phone_number.R")
+source("round_up_to_nearest_cent.R")
 
 getmode <- function(v) {
   uniqv <- unique(v)
@@ -27,15 +29,49 @@ divvy_charges <- function(month_year, lines) {
              0, `Government taxes & fees`
            )
     )
+  usage_path <- file.path("html_usage", paste0(month_year, ".html"))
+  usage <- parse_usage(usage_path, lines)
+  write_csv(usage, file.path("usage_summaries", paste0(month_year, ".csv")))
+  if("Data & text usage charges" %in% names(bill_df)) {
+    cat("It appears there are overage charges on this bill; check bill_df to make sure they are divvied properly.\n")
+    # If overage is assigned to primary user, assume it's a plan-wide overage
+    # Else assume it is a line-specific overage
+    bill_df <- bill_df %>%
+      left_join(usage, by = "Name") %>%
+      mutate(
+        `Has usage charges` = !is.na(`Data & text usage charges`),
+        `Plan-wide overages` = if_else(
+          `Has usage charges`[1], 
+          `Data & text usage charges`[1], 0
+        ), 
+        `Line-specific overages` = if_else(
+          `Has usage charges`,
+          `Data & text usage charges`, 0
+        ),
+        `Share of usage` = Usage / sum(Usage), 
+        `Share of plan-wide overages` = `Plan-wide overages` * `Share of usage`
+      )
+    
+    bill_df$`Line-specific overages`[1] <- 0
+  } else {
+    bill_df <- bill_df %>%
+      mutate(
+        `Share of plan-wide overages` = 0, 
+        `Line-specific overages` = 0
+      )
+  }
+  write_csv(bill_df, file.path("bill_dfs", paste0(month_year, ".csv")))
   bill_summary <- bill_df %>%
     mutate(Owes = 
              `Charge per line` + 
              `Divvied base charge` + 
              `Equipment charges` + 
              `Surcharges & fees` + 
-             `Government taxes & fees`
+             `Government taxes & fees` + 
+             `Share of plan-wide overages` + 
+             `Line-specific overages`
     ) %>%
-    mutate(Owes = round(Owes, 2)) %>%
+    mutate(Owes = round_up_to_nearest_cent(Owes)) %>%
     select(Name, Owes) %>%
     bind_rows(tibble("Name" = "Total", "Owes" = sum(.$Owes)))
   write_tsv(bill_summary, 
@@ -80,5 +116,24 @@ parse_bill <- function(bill_path, lines) {
         map_dfc(charges, charges_to_df)
       )
     }
+  )
+}
+
+parse_usage <- function(usage_path, lines) {
+  usage_html <- read_html(usage_path)
+  number_selector <- "#ac8panel0 .letterSpaceScrReader"
+  numbers <- usage_html %>%
+    html_nodes(number_selector) %>%
+    html_text(trim = TRUE) %>%
+    map_chr(reformat_phone_number)
+  usage_selector <- ".dataUsageCount .ng-binding"
+  usage <- usage_html %>%
+    html_nodes(usage_selector) %>%
+    html_text(trim = TRUE) %>%
+    as.numeric()
+  usage <- usage[!is.na(usage)]
+  tibble(
+    Name = names(lines)[map_int(numbers, ~ which(lines == .))], 
+    Usage = usage
   )
 }

@@ -6,3 +6,5 @@ lines.R
 html_bills/*
 bill_dfs/*
 bill_summaries
+html_usage
+usage_summaries

@@ -1,6 +1,6 @@
 tidy_equipment_charges <- function(ec) {
   require(stringr)
-  installment_pattern <- "Installment (\\d{1,2}) of (\\d{1,2})"
+  installment_pattern <- "Installment {1,2}(\\d{1,2}) of (\\d{1,2})"
   ec <- ec[[1]]
   payments_left <- ec %>%
     .[str_detect(., installment_pattern)] %>%
