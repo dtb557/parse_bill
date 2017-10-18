@@ -5,6 +5,11 @@ source("lines.R")
 source("tidy_equipment_charges.R")
 source("charges_to_df.R")
 
+getmode <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
 divvy_charges <- function(month_year, lines) {
   bill_path <- file.path(
     "html_bills", 
@@ -14,11 +19,32 @@ divvy_charges <- function(month_year, lines) {
   write_csv(bill_df, file.path("bill_dfs", paste0(month_year, ".csv")))
   bill_df <- bill_df %>%
     rename_at(vars(starts_with("Monthly plan charges")), ~ "Monthly plan charges") %>%
+    mutate("Charge per line" = getmode(`Monthly plan charges`),
+           "Base plan charge" = max(`Monthly plan charges`) - `Charge per line`, 
+           "Divvied base charge" = `Base plan charge` / nrow(bill_df),
+           "Government taxes & fees" = if_else(
+             is.na(`Government taxes & fees`), 
+             0, `Government taxes & fees`
+           )
+    )
   bill_summary <- bill_df %>%
-    select()
+    mutate(Owes = 
+             `Charge per line` + 
+             `Divvied base charge` + 
+             `Equipment charges` + 
+             `Surcharges & fees` + 
+             `Government taxes & fees`
+    ) %>%
+    mutate(Owes = round(Owes, 2)) %>%
+    select(Name, Owes) %>%
+    bind_rows(tibble("Name" = "Total", "Owes" = sum(.$Owes)))
+  write_tsv(bill_summary, 
+            file.path(
+              "bill_summaries", 
+              paste0(month_year, ".txt")
+            )
+  )
 }
-
-bill_path <- "html_bills/sep_2017_my_bill.html"
 
 parse_bill <- function(bill_path, lines) {
   bill_html <- read_html(bill_path)
@@ -56,56 +82,3 @@ parse_bill <- function(bill_path, lines) {
     }
   )
 }
-
-bill_df <- parse_bill(bill_path, lines)
-
-write_csv(bill_df, )
-
-
-
-
-# CSS selectors -----------------------------------------------------------
-
-name_number_total_selector <- ".margin-bottom20 div:nth-child(2) .no-dots b"
-monthly_plan_charges_selector <- ".MonthlyChargeAlert .no-dots .ng-binding"
-equipment_charges_selector <- ".EquipmentAlert b"
-surcharges_fees_selector <- "#printfa .ng-scope .ng-scope :nth-child(4) b"
-govt_taxes_fees_selector <- ":nth-child(10) :nth-child(4) b , :nth-child(8) :nth-child(4) b, :nth-child(6) :nth-child(4) b, .accord-content-block:nth-child(5) b"
-
-tmp_selector <- "#panel1 :nth-child(1)"
-tmp_selector <- "div[id^='tab']"
-tmp_selector <- "div[id*='651-592-5063']"
-
-# Parse bill --------------------------------------------------------------
-
-bill_path <- "html_bills/sep_2017.html"
-html <- read_html(bill_path)
-
-text_of_selected <- function(html, selector) {
-  map_chr(html_nodes(html, selector), html_text)
-}
-
-select_after <- function(html, selector1, selector2) {
-  first_node <- html_node(html, selector1)
-  html_node(first_node)
-}
-
-text_of_selected(html, name_number_total_selector)
-text_of_selected(html, monthly_plan_charges_selector)
-text_of_selected(html, equipment_charges_selector)
-
-divs <- html_nodes(html, "div")
-
-main_container <- html_nodes(
-  html, 
-  "body > div.main-container"
-)
-
-main_children <- html_children(main_container)
-main_div_children <- html_nodes(main_children, "div")
-
-map_chr(main_div_children, html_attr, "id")
-
-bs <- html_nodes(html, css = "b")
-
-"#printfa > div.wireless-details > div > div:nth-child(2) > div:nth-child(1) > div:nth-child(2) > div:nth-child(1) > span > b"
